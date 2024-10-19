@@ -1,4 +1,5 @@
-import { Worker, isMainThread, parentPort, workerData } from "worker_threads";
+import { isMainThread, parentPort, workerData } from "worker_threads";
+
 import { User } from "./userRepository.js";
 import { uuidv4 } from "./utils.js";
 
@@ -15,16 +16,7 @@ export class SharedDatabase {
     this.view = new Uint8Array(this.buffer);
   }
 
-  private encodeUser(user: User): Uint8Array {
-    const encoder = new TextEncoder();
-    const data = JSON.stringify(user);
-    const encoded = encoder.encode(data);
-    const paddedArray = new Uint8Array(USER_SIZE);
-    paddedArray.set(encoded);
-    return paddedArray;
-  }
-
-  private decodeUser(data: Uint8Array): User | null {
+  private decodeUser(data: Uint8Array): null | User {
     const decoder = new TextDecoder();
     const nullIndex = data.indexOf(0);
     const jsonString = decoder.decode(
@@ -37,13 +29,30 @@ export class SharedDatabase {
     }
   }
 
-  set(user: User): void {
-    const index = parseInt(user.id, 36) % MAX_USERS;
-    const encodedUser = this.encodeUser(user);
-    this.view.set(encodedUser, index * USER_SIZE);
+  private encodeUser(user: User): Uint8Array {
+    const encoder = new TextEncoder();
+    const data = JSON.stringify(user);
+    const encoded = encoder.encode(data);
+    const paddedArray = new Uint8Array(USER_SIZE);
+    paddedArray.set(encoded);
+    return paddedArray;
   }
 
-  get(id: string): User | undefined {
+  create(userData: Omit<User, "id">): User {
+    const newUser = { ...userData, id: uuidv4() };
+    this.set(newUser);
+    return newUser;
+  }
+
+  delete(id: string): boolean {
+    const index = parseInt(id, 36) % MAX_USERS;
+    const user = this.get(id);
+    if (!user) return false;
+    this.view.fill(0, index * USER_SIZE, (index + 1) * USER_SIZE);
+    return true;
+  }
+
+  get(id: string): undefined | User {
     const index = parseInt(id, 36) % MAX_USERS;
     const userData = this.view.slice(
       index * USER_SIZE,
@@ -63,26 +72,14 @@ export class SharedDatabase {
     return users;
   }
 
-  create(userData: Omit<User, "id">): User {
-    const newUser = { ...userData, id: uuidv4() };
-    this.set(newUser);
-    return newUser;
+  getBuffer(): SharedArrayBuffer {
+    return this.buffer;
   }
 
-  update(id: string, userData: Partial<User>): User | undefined {
-    const existingUser = this.get(id);
-    if (!existingUser) return undefined;
-    const updatedUser = { ...existingUser, ...userData, id };
-    this.set(updatedUser);
-    return updatedUser;
-  }
-
-  delete(id: string): boolean {
-    const index = parseInt(id, 36) % MAX_USERS;
-    const user = this.get(id);
-    if (!user) return false;
-    this.view.fill(0, index * USER_SIZE, (index + 1) * USER_SIZE);
-    return true;
+  set(user: User): void {
+    const index = parseInt(user.id, 36) % MAX_USERS;
+    const encodedUser = this.encodeUser(user);
+    this.view.set(encodedUser, index * USER_SIZE);
   }
 
   setBuffer(buffer: SharedArrayBuffer) {
@@ -90,8 +87,12 @@ export class SharedDatabase {
     this.view = new Uint8Array(this.buffer);
   }
 
-  getBuffer(): SharedArrayBuffer {
-    return this.buffer;
+  update(id: string, userData: Partial<User>): undefined | User {
+    const existingUser = this.get(id);
+    if (!existingUser) return undefined;
+    const updatedUser = { ...existingUser, ...userData, id };
+    this.set(updatedUser);
+    return updatedUser;
   }
 }
 
@@ -103,20 +104,20 @@ if (!isMainThread) {
   parentPort?.on("message", ({ action, payload }) => {
     let result;
     switch (action) {
-      case "getAll":
-        result = db.getAll();
+      case "create":
+        result = db.create(payload);
+        break;
+      case "delete":
+        result = db.delete(payload.id);
         break;
       case "get":
         result = db.get(payload.id);
         break;
-      case "create":
-        result = db.create(payload);
+      case "getAll":
+        result = db.getAll();
         break;
       case "update":
         result = db.update(payload.id, payload.data);
-        break;
-      case "delete":
-        result = db.delete(payload.id);
         break;
     }
     parentPort?.postMessage({ action, result });

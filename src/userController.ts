@@ -1,15 +1,19 @@
+import cluster from "node:cluster";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { URL } from "node:url";
-import { isValidUUIDv4 } from "./utils.js";
+
 import usersDB, { User } from "./userRepository.js";
-import cluster from "node:cluster";
+import { isValidUUIDv4 } from "./utils.js";
 
 const isClusterMode = process.env.CLUSTER_MODE === "true";
 
-function sendRequestToWorker(action: string, payload?: any): Promise<any> {
+function sendRequestToWorker(
+  action: string,
+  payload?: unknown,
+): Promise<unknown> {
   return new Promise((resolve) => {
     process.send?.({ action, payload });
-    process.once("message", (msg: any) => {
+    process.once("message", (msg: { action: string; result: unknown }) => {
       if (msg.action === action) {
         resolve(msg.result);
       }
@@ -25,6 +29,9 @@ export function routeUserRequests(
   const id = url.pathname.split("/")[3];
 
   switch (req.method) {
+    case "DELETE":
+      deleteUser(id, res);
+      break;
     case "GET":
       if (id) {
         getUserById(id, res);
@@ -37,9 +44,6 @@ export function routeUserRequests(
       break;
     case "PUT":
       updateUser(id, req, res);
-      break;
-    case "DELETE":
-      deleteUser(id, res);
       break;
     default:
       res.writeHead(405, { "Content-Type": "application/json" });
@@ -93,9 +97,9 @@ async function createUser(
   req.on("end", async () => {
     try {
       const {
-        username = undefined,
         age = undefined,
         hobbies = undefined,
+        username = undefined,
       } = JSON.parse(body);
       if (!username || !age || !hobbies) {
         res.writeHead(400, { "Content-Type": "application/json" });
@@ -103,9 +107,9 @@ async function createUser(
         return;
       }
       const userData = {
-        username,
         age,
         hobbies: Array.isArray(hobbies) ? hobbies : [],
+        username,
       };
       let newUser;
       if (isClusterMode && !cluster.isPrimary) {
@@ -115,7 +119,7 @@ async function createUser(
       }
       res.writeHead(201, { "Content-Type": "application/json" });
       res.end(JSON.stringify(newUser));
-    } catch (error) {
+    } catch {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ message: "Invalid JSON" }));
     }
@@ -140,9 +144,9 @@ async function updateUser(
   req.on("end", async () => {
     try {
       const {
-        username = undefined,
         age = undefined,
         hobbies = undefined,
+        username = undefined,
       } = JSON.parse(body);
       if (!username || !age || !hobbies) {
         res.writeHead(400, { "Content-Type": "application/json" });
@@ -150,16 +154,16 @@ async function updateUser(
         return;
       }
       const updatedUserData: User = {
-        id,
-        username,
         age,
         hobbies: Array.isArray(hobbies) ? hobbies : [],
+        id,
+        username,
       };
       let result;
       if (isClusterMode && !cluster.isPrimary) {
         result = await sendRequestToWorker("update", {
-          id,
           data: updatedUserData,
+          id,
         });
       } else {
         result = usersDB.update(id, updatedUserData);
@@ -171,7 +175,7 @@ async function updateUser(
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result));
-    } catch (error) {
+    } catch {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ message: "Invalid JSON" }));
     }

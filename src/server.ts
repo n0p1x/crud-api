@@ -1,5 +1,6 @@
 import http from "node:http";
 import { URL } from "node:url";
+
 import { routeUserRequests } from "./userController.js";
 
 export function createHttpServer() {
@@ -21,6 +22,7 @@ export function createHttpServer() {
   });
 
   return {
+    server,
     start: (port: number) => {
       server.listen(port, () => {
         console.log(`Worker ${process.pid} is running on port ${port}`);
@@ -31,6 +33,5 @@ export function createHttpServer() {
         server.close(() => resolve());
       });
     },
-    server,
   };
 }

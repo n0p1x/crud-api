@@ -3,6 +3,7 @@ import cluster from "node:cluster";
 import os from "node:os";
 import { join } from "node:path";
 import { Worker } from "worker_threads";
+
 import { createHttpServer } from "./server.js";
 import { SharedDatabase } from "./userDatabase.js";
 import { __dirname } from "./utils.js";
@@ -40,7 +41,7 @@ if (CLUSTER_MODE) {
 
 function createClusterWorker(db: SharedDatabase, index: number) {
   const worker = cluster.fork({ WORKER_ID: index });
-  let dbWorker: Worker | null = null;
+  let dbWorker: null | Worker = null;
 
   worker.on("online", () => {
     const workerPath = join(__dirname, "userDatabase.js");
