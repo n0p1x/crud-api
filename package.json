@@ -6,7 +6,8 @@
   "scripts": {
     "start:dev": "nodemon --exec 'node --import=./register.js' --watch 'src' --verbose src/app.ts",
     "start:prod": "npm run build && node dist/src/app.js",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "node --import=./register.js --test tests/**/*.test.ts"
   },
   "keywords": [],
   "author": "",
