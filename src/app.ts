@@ -1,48 +1,83 @@
-import http from "node:http";
-import { URL } from "node:url";
 import dotenv from "dotenv";
-import { handleUserRoutes } from "./routes/userRoutes.js";
+import cluster from "node:cluster";
+import os from "node:os";
+import { join } from "node:path";
+import { Worker } from "worker_threads";
+import { createHttpServer } from "./server.js";
+import { SharedDatabase } from "./userDatabase.js";
+import { __dirname } from "./utils.js";
 
 dotenv.config();
 
-export function createServer() {
-  const port = parseInt(process.env.PORT || "3000", 10);
+const CLUSTER_MODE = process.env.CLUSTER_MODE === "true";
+const BASE_PORT = parseInt(process.env.PORT || "4000", 10);
 
-  const server = http.createServer((req, res) => {
-    try {
-      const url = new URL(req.url || "", `http://${req.headers.host}`);
+if (CLUSTER_MODE) {
+  if (cluster.isPrimary) {
+    const numCPUs = os.cpus().length;
+    const db = new SharedDatabase();
 
-      if (url.pathname.startsWith("/api/users")) {
-        handleUserRoutes(req, res);
-      } else {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ message: "Not Found" }));
+    console.log(`Primary ${process.pid} is running on port ${BASE_PORT}`);
+
+    for (let i = 0; i < numCPUs; i++) {
+      createClusterWorker(db, i);
+    }
+
+    cluster.on("exit", (worker, code, signal) => {
+      console.log(
+        `Worker ${worker.process.pid} died with code ${code} and signal ${signal}`,
+      );
+      createClusterWorker(db, worker.id - 1);
+    });
+  } else {
+    const workerId = cluster.worker?.id ?? 0;
+    const port = BASE_PORT + workerId - 1;
+    createHttpServer().start(port);
+  }
+} else {
+  createHttpServer().start(BASE_PORT);
+}
+
+function createClusterWorker(db: SharedDatabase, index: number) {
+  const worker = cluster.fork({ WORKER_ID: index });
+  let dbWorker: Worker | null = null;
+
+  worker.on("online", () => {
+    const workerPath = join(__dirname, "userDatabase.js");
+
+    dbWorker = new Worker(workerPath, {
+      workerData: { buffer: db.getBuffer() },
+    });
+
+    dbWorker.on("message", (msg) => {
+      try {
+        worker.send(msg);
+      } catch (err) {
+        console.error("Error sending message to worker:", err);
       }
-    } catch (error) {
-      console.error("Server error:", error);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ message: "Internal Server Error" }));
+    });
+
+    dbWorker.on("error", (err) => {
+      console.error("Thread worker error:", err);
+    });
+
+    dbWorker.on("exit", (code) => {
+      console.log(`Thread worker exited with code ${code}`);
+      if (code !== 0) {
+        createClusterWorker(db, index);
+      }
+    });
+  });
+
+  worker.on("message", (msg) => {
+    try {
+      dbWorker?.postMessage(msg);
+    } catch (err) {
+      console.error("Error sending message to thread worker:", err);
     }
   });
 
-  return {
-    start: () => {
-      server.listen(port, () => {
-        console.log(`Server is running on port ${port}`);
-      });
-    },
-    stop: () => {
-      return new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      });
-    },
-    server,
-  };
-}
-
-// Start the server if this file is run directly
-if (import.meta.url.startsWith("file:")) {
-  console.log("Starting server...");
-  const { start } = createServer();
-  start();
+  worker.on("error", (err) => {
+    console.error("Cluster worker error:", err);
+  });
 }

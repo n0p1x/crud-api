@@ -1,9 +1,23 @@
 import { IncomingMessage, ServerResponse } from "node:http";
 import { URL } from "node:url";
-import { uuidValidateV4 } from "../utils.js";
-import usersDB, { User } from "../models/user.js";
+import { isValidUUIDv4 } from "./utils.js";
+import usersDB, { User } from "./userRepository.js";
+import cluster from "node:cluster";
 
-export function handleUserRoutes(
+const isClusterMode = process.env.CLUSTER_MODE === "true";
+
+function sendRequestToWorker(action: string, payload?: any): Promise<any> {
+  return new Promise((resolve) => {
+    process.send?.({ action, payload });
+    process.once("message", (msg: any) => {
+      if (msg.action === action) {
+        resolve(msg.result);
+      }
+    });
+  });
+}
+
+export function routeUserRequests(
   req: IncomingMessage,
   res: ServerResponse,
 ): void {
@@ -33,19 +47,31 @@ export function handleUserRoutes(
   }
 }
 
-function getAllUsers(res: ServerResponse): void {
+async function getAllUsers(res: ServerResponse): Promise<void> {
+  let users;
+  if (isClusterMode && !cluster.isPrimary) {
+    users = await sendRequestToWorker("getAll");
+  } else {
+    users = usersDB.getAll();
+  }
   res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(usersDB.getAll()));
+  res.end(JSON.stringify(users));
 }
 
-function getUserById(id: string, res: ServerResponse): void {
-  if (!uuidValidateV4(id)) {
+async function getUserById(id: string, res: ServerResponse): Promise<void> {
+  if (!isValidUUIDv4(id)) {
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: "Invalid user ID" }));
     return;
   }
 
-  const user = usersDB.getById(id);
+  let user;
+  if (isClusterMode && !cluster.isPrimary) {
+    user = await sendRequestToWorker("get", { id });
+  } else {
+    user = usersDB.getById(id);
+  }
+
   if (!user) {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: "User not found" }));
@@ -56,12 +82,15 @@ function getUserById(id: string, res: ServerResponse): void {
   res.end(JSON.stringify(user));
 }
 
-function createUser(req: IncomingMessage, res: ServerResponse): void {
+async function createUser(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
   let body = "";
   req.on("data", (chunk) => {
     body += chunk.toString();
   });
-  req.on("end", () => {
+  req.on("end", async () => {
     try {
       const {
         username = undefined,
@@ -73,11 +102,17 @@ function createUser(req: IncomingMessage, res: ServerResponse): void {
         res.end(JSON.stringify({ message: "Missing required fields" }));
         return;
       }
-      const newUser = usersDB.create({
+      const userData = {
         username,
         age,
         hobbies: Array.isArray(hobbies) ? hobbies : [],
-      });
+      };
+      let newUser;
+      if (isClusterMode && !cluster.isPrimary) {
+        newUser = await sendRequestToWorker("create", userData);
+      } else {
+        newUser = usersDB.create(userData);
+      }
       res.writeHead(201, { "Content-Type": "application/json" });
       res.end(JSON.stringify(newUser));
     } catch (error) {
@@ -87,12 +122,12 @@ function createUser(req: IncomingMessage, res: ServerResponse): void {
   });
 }
 
-function updateUser(
+async function updateUser(
   id: string,
   req: IncomingMessage,
   res: ServerResponse,
-): void {
-  if (!uuidValidateV4(id)) {
+): Promise<void> {
+  if (!isValidUUIDv4(id)) {
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: "Invalid user ID" }));
     return;
@@ -102,7 +137,7 @@ function updateUser(
   req.on("data", (chunk) => {
     body += chunk.toString();
   });
-  req.on("end", () => {
+  req.on("end", async () => {
     try {
       const {
         username = undefined,
@@ -114,20 +149,28 @@ function updateUser(
         res.end(JSON.stringify({ message: "Missing required fields" }));
         return;
       }
-      const updatedUser: User = {
+      const updatedUserData: User = {
         id,
         username,
         age,
         hobbies: Array.isArray(hobbies) ? hobbies : [],
       };
-      const result = usersDB.update(id, updatedUser);
+      let result;
+      if (isClusterMode && !cluster.isPrimary) {
+        result = await sendRequestToWorker("update", {
+          id,
+          data: updatedUserData,
+        });
+      } else {
+        result = usersDB.update(id, updatedUserData);
+      }
       if (!result) {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ message: "User not found" }));
         return;
       }
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(updatedUser));
+      res.end(JSON.stringify(result));
     } catch (error) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ message: "Invalid JSON" }));
@@ -135,14 +178,20 @@ function updateUser(
   });
 }
 
-function deleteUser(id: string, res: ServerResponse): void {
-  if (!uuidValidateV4(id)) {
+async function deleteUser(id: string, res: ServerResponse): Promise<void> {
+  if (!isValidUUIDv4(id)) {
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: "Invalid user ID" }));
     return;
   }
 
-  const result = usersDB.delete(id);
+  let result;
+  if (isClusterMode && !cluster.isPrimary) {
+    result = await sendRequestToWorker("delete", { id });
+  } else {
+    result = usersDB.delete(id);
+  }
+
   if (!result) {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: "User not found" }));

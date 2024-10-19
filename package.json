@@ -6,6 +6,7 @@
   "scripts": {
     "start:dev": "nodemon --exec 'node --import=./register.js' --watch 'src' --verbose src/app.ts",
     "start:prod": "npm run build && node dist/src/app.js",
+    "start:multi": "npm run build && cross-env CLUSTER_MODE=true node dist/src/app.js",
     "build": "tsc",
     "test": "node --import=./register.js --test tests/**/*.test.ts"
   },
@@ -14,6 +15,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "cross-env": "^7.0.3",
     "dotenv": "^16.4.5",
     "uuid": "^10.0.0"
   },

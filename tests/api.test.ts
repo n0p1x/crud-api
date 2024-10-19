@@ -1,7 +1,7 @@
 import http from "node:http";
 import { test, describe, before, after, it } from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "../src/app.js";
+import { createHttpServer } from "../src/server.js";
 import { uuidv4 } from "../src/utils.js";
 
 function request(
@@ -32,10 +32,10 @@ function request(
 describe("User API", () => {
   let userId: string;
   let serverPort: number;
-  let serverInstance: ReturnType<typeof createServer>;
+  let serverInstance: ReturnType<typeof createHttpServer>;
 
   before(() => {
-    serverInstance = createServer();
+    serverInstance = createHttpServer();
     return new Promise<void>((resolve) => {
       serverInstance.server.listen(0, () => {
         serverPort = (serverInstance.server.address() as any).port;

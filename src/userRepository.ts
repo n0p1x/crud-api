@@ -1,4 +1,4 @@
-import { uuidv4 } from "../utils.js";
+import { uuidv4 } from "./utils.js";
 
 export interface User {
   id: string;
@@ -7,7 +7,7 @@ export interface User {
   hobbies: string[];
 }
 
-class UserModel {
+class UserRepository {
   private users: User[] = [];
 
   getAll(): User[] {
@@ -39,4 +39,4 @@ class UserModel {
   }
 }
 
-export default new UserModel();
+export default new UserRepository();
